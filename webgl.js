@@ -15,7 +15,7 @@ class MyGL {
 
 		this.vShader = null;
 		this.fShader = null;
-		this.program = null;
+		this.programList = [];
 		this.mMatrix = null;
 		this.vMatrix = null;
 		this.pMatrix = null;
@@ -23,9 +23,12 @@ class MyGL {
 		this.uniLocation = null;
 
 		this.initWebGL(canvas, width, height);
-		this.initShader();
-		this.initProgram();
-		this.initMatrix();
+		// this.initShader();
+		// this.initProgram();
+		this.initPolygonProgram();
+		this.initMatrix(this.programList.polygon);
+		this.initTextureProgram();
+		this.initMatrix(this.programList.texture);
 		
 		let gl = this.gl;
 
@@ -33,7 +36,10 @@ class MyGL {
 		this.flush();
 	}
 
-	initMatrix() {
+	/**
+	 * MVPマトリクスの初期化
+	 */
+	initMatrix(program) {
 		let mativ = this.mativ;
 
 		// 行列ライブラリ初期化、行列生成
@@ -54,8 +60,9 @@ class MyGL {
 		mativ.multiply(mvpMatrix, mMatrix, mvpMatrix);
 
 		// uniformLocationの取得
-		let uniLocation = this.gl.getUniformLocation(this.program, 'mvpMatrix');
 		// uniformLocationへ座標変換行列を登録
+		this.gl.useProgram(program);
+		let uniLocation = this.gl.getUniformLocation(program, 'mvpMatrix');
 		this.gl.uniformMatrix4fv(uniLocation, false, mvpMatrix);
 
 		this.mMatrix = mMatrix;
@@ -64,20 +71,232 @@ class MyGL {
 		this.mvpMatrix = mvpMatrix;
 		this.uniLocation = uniLocation;
 	}
+	/**
+	 * WebGL関連の初期化
+	 * @param {Canvas} canvas キャンバス
+	 * @param {Number} width キャンバスの幅
+	 * @param {Number} height キャンバスの高さ
+	 */
+	initWebGL(canvas, width, height) {
+		canvas.width = width;
+		canvas.height = height;
+		// コンテキスト取得
+		let gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+		this.gl = gl;
+		// 初期化色の設定
+		gl.clearColor(0, 0, 0, 1.0); // R,G,B,A
+		// 初期化の深度を設定
+		gl.clearDepth(1.0);
+		// テクスチャを有効に
+		gl.activeTexture(gl.TEXTURE0);
+		// 初期化
+		this.clear();
+	}
+
+	/**
+	 * ポリゴン用シェーダとプログラムの初期化
+	 */
+	initPolygonProgram() {
+		let gl = this.gl;
+		// 頂点（バーテックス）シェーダ
+		let vShader = this.createShader(`
+			attribute vec3 position;
+			attribute vec4 color;
+			uniform   mat4 mvpMatrix;
+			varying   vec4 vColor;
+
+			void main(void){
+				vColor = color;
+				gl_Position = mvpMatrix * vec4(position, 1.0);
+			}
+		`, 'vertex');
+		// フラグメントシェーダ
+		let fShader = this.createShader(`
+			precision mediump float;
+			varying vec4      vColor;
+			void main(void){
+				// 色設定
+				gl_FragColor = vColor;
+			}
+		`, 'fragment');
+		this.programList['polygon'] = this.createProgram(vShader, fShader);
+	}
+
+	/**
+	 * テクスチャ用シェーダとプログラムの初期化
+	 */
+	initTextureProgram() {
+		let gl = this.gl;
+		// 頂点（バーテックス）シェーダ
+		let vShader = this.createShader(`
+			attribute vec3 position;
+			attribute vec4 color;
+			attribute vec2 textureCoord;
+			uniform   mat4 mvpMatrix;
+			varying   vec4 vColor;
+			varying   vec2 vTextureCoord;
+
+			void main(void){
+				vColor = color;
+				vTextureCoord = textureCoord;
+				gl_Position = mvpMatrix * vec4(position, 1.0);
+			}
+		`, 'vertex');
+		// フラグメントシェーダ
+		let fShader = this.createShader(`
+			precision mediump float;
+			uniform sampler2D texture;
+			varying vec4      vColor;
+			varying vec2      vTextureCoord;
+			void main(void){
+				// 色設定
+				vec4 smpColor = texture2D(texture, vTextureCoord);
+				gl_FragColor  = vColor * smpColor;
+			}
+		`, 'fragment');
+		this.programList['texture'] = this.createProgram(vShader, fShader);
+	}
+
+	createShader(src, type) {
+		let gl = this.gl;
+		let shader;
+		if (type === 'vertex') {
+			shader = gl.createShader(gl.VERTEX_SHADER);
+		} else if (type === 'fragment') {
+			shader = gl.createShader(gl.FRAGMENT_SHADER);
+		} else {
+			throw new Error(`createShader, シェーダのタイプが不正 (${type})`);
+		}
+		// 生成されたシェーダにソースを割り当てる
+		gl.shaderSource(shader, src);
+		// シェーダをコンパイルする
+		gl.compileShader(shader);
+		// シェーダが正しくコンパイルされたかチェック
+		if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+			// 成功していたらシェーダを返して終了
+			return shader;
+		} else {
+			// 失敗していたらエラーログをアラートする
+			let log = gl.getShaderInfoLog(shader);
+			console.log(type + ' : ' + log);
+			throw new Error(log);
+		}
+	}
+
+	createProgram(vShader, fShader) {
+		let gl = this.gl;
+		
+		let program = gl.createProgram();
+		
+		// プログラムオブジェクトにシェーダ割り当て
+		gl.attachShader(program, vShader);
+		gl.attachShader(program, fShader);
+		
+		// シェーダをリンク
+		gl.linkProgram(program);
+		
+		// シェーダのリンクが正しくできたかチェック
+		if (gl.getProgramParameter(program, gl.LINK_STATUS)) {
+			// 成功
+			// プログラムオブジェクトを有効にする
+			gl.useProgram(program);
+			return program;
+		} else {
+			let log = (gl.getProgramInfoLog(program));
+			console.log(log);
+			throw new Error(log);
+		}
+	}
+
+	/**
+	 * VBO（頂点バッファオブジェクト）を生成する
+	 * @param {Array} data 頂点バッファに保持させる情報
+	 */
+	createVbo(data) {
+		let gl = this.gl;
+		let vbo = gl.createBuffer();
+	
+		// バッファをバインド
+		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+		// バッファにデータを設定
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+		// バッファのバインドを無効化
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+	
+		return vbo;
+	}
+
+	/**
+	 * IBO（インデックスバッファオブジェクト）を生成する
+	 * @param {Array} data インデックスバッファの値
+	 */
+	createIbo(data) {
+		let gl = this.gl;
+		var ibo = gl.createBuffer();
+
+		// バッファをバインドする
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+		// バッファにデータをセット
+		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Int16Array(data), gl.STATIC_DRAW);
+		// バッファのバインドを無効化
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+
+		return ibo;
+	}
+
+	/**
+	 * GLオブジェクトにAttributeを設定する
+	 * @param {String} name Attribute名
+	 * @param {Number} stride 変数の要素数
+	 * @param {VBO} vbo 設定するVBO
+	 * @param {ProgramObj} program 設定先
+	 */
+	setAttribute(program, name, stride, vbo) {
+		let gl = this.gl;
+		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+	
+		// attributeLocationの取得
+		let location = gl.getAttribLocation(program, name);
+		// attributeを有効にする
+		gl.enableVertexAttribArray(location);
+		// VBOを登録
+		gl.vertexAttribPointer(location, stride, gl.FLOAT, false, 0, 0);
+	
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+	}
+
+	/**
+	 * 描画をクリアする
+	 */
+	clear() {
+		let gl = this.gl;
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+	}
+
+	/**
+	 * コンテキストの再描画
+	 */
+	flush() {
+		this.gl.flush();
+	}
 
 	drawFillTriangle(x1, y1, x2, y2, x3, y3, color) {
 		let gl = this.gl;
+		let program = this.programList.polygon;
+
+		gl.useProgram(program);
+
 		let vertexPos = this.exchangePos([
 			x1, y1, 0,
 			x2, y2, 0,
 			x3, y3, 0
 		]);
 		let vertexPosVbo = this.createVbo(vertexPos);
-		this.setAttribute('position', 3, vertexPosVbo);
+		this.setAttribute(program, 'position', 3, vertexPosVbo);
 		
 		let vertexColor = this.exchangeColor(color);
 		let vertexColorVbo = this.createVbo(vertexColor);
-		this.setAttribute('color', 4, vertexColorVbo);
+		this.setAttribute(program, 'color', 4, vertexColorVbo);
 		
 		// モデルの描画
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -88,6 +307,9 @@ class MyGL {
 
 	drawFillRect(x1, y1, x2, y2, color) {
 		let gl = this.gl;
+		let program = this.programList.polygon;
+
+		gl.useProgram(program);
 
 		let vertexPos = this.exchangePos([
 			x1, y1, 0,
@@ -96,11 +318,11 @@ class MyGL {
 			x2, y2, 0
 		], 4);
 		let vertexPosVbo = this.createVbo(vertexPos);
-		this.setAttribute('position', 3, vertexPosVbo);
+		this.setAttribute(program, 'position', 3, vertexPosVbo);
 
 		let vertexColor = this.exchangeColor(color, 4);
 		let vertexColorVbo = this.createVbo(vertexColor);
-		this.setAttribute('color', 4, vertexColorVbo);
+		this.setAttribute(program, 'color', 4, vertexColorVbo);
 
 		let index = [
 			0, 1, 2,
@@ -117,16 +339,17 @@ class MyGL {
 
 	drawImage(x, y, image) {
 		let gl = this.gl;
+		let program = this.programList.texture;
+
+		gl.useProgram(program);
 
 		let tex = gl.createTexture();
 		gl.bindTexture(gl.TEXTURE_2D, tex);
 		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
 		gl.generateMipmap(gl.TEXTURE_2D); // ミップマップ生成
 
-		let uniLocation = this.gl.getUniformLocation(this.program, 'texture');
 		gl.bindTexture(gl.TEXTURE_2D, tex);
-		gl.uniform1i(uniLocation, 0);
-
+		gl.uniform1i(gl.getUniformLocation(program, 'texture'), 0);
 
 		let textureCoord = [
 			0, 0,
@@ -135,7 +358,7 @@ class MyGL {
 			1, 1
 		];
 		let textureCoordVbo = this.createVbo(textureCoord);
-		this.setAttribute('textureCoord', 2, textureCoordVbo);
+		this.setAttribute(program, 'textureCoord', 2, textureCoordVbo);
 
 		let w = image.width;
 		let h = image.height;
@@ -151,10 +374,10 @@ class MyGL {
 			x2, y2, 0
 		], 4);
 		let vertexPosVbo = this.createVbo(vertexPos);
-		this.setAttribute('position', 3, vertexPosVbo);
+		this.setAttribute(program, 'position', 3, vertexPosVbo);
 
 		let vertexColorVbo = this.createVbo([1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1]);
-		this.setAttribute('color', 4, vertexColorVbo);
+		this.setAttribute(program, 'color', 4, vertexColorVbo);
 
 		let index = [
 			0, 1, 2,
@@ -213,193 +436,6 @@ class MyGL {
 		}
 	}
 
-	/**
-	 * WebGL関連の初期化
-	 * @param {Canvas} canvas キャンバス
-	 * @param {Number} width キャンバスの幅
-	 * @param {Number} height キャンバスの高さ
-	 */
-	initWebGL(canvas, width, height) {
-		canvas.width = width;
-		canvas.height = height;
-		// コンテキスト取得
-		let gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-		this.gl = gl;
-		// 初期化色の設定
-		gl.clearColor(0, 0, 0, 1.0); // R,G,B,A
-		// 初期化の深度を設定
-		gl.clearDepth(1.0);
-		// テクスチャを有効に
-		gl.activeTexture(gl.TEXTURE0);
-		// 初期化
-		this.clear();
-	}
-
-	/**
-	 * シェーダの初期化
-	 */
-	initShader() {
-		// 頂点（バーテックス）シェーダ
-		let vSource = `
-			attribute vec3 position;
-			attribute vec4 color;
-			attribute vec2 textureCoord;
-			uniform   mat4 mvpMatrix;
-			varying   vec4 vColor;
-			varying   vec2 vTextureCoord;
-
-			void main(void){
-				vColor = color;
-				vTextureCoord = textureCoord;
-				gl_Position = mvpMatrix * vec4(position, 1.0);
-			}
-		`;
-		// フラグメントシェーダ
-		let fSource = `
-			precision mediump float;
-			uniform sampler2D texture;
-			varying vec4      vColor;
-			varying vec2      vTextureCoord;
-			void main(void){
-				// 色設定
-				// gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
-				// gl_FragColor = vColor;
-				vec4 smpColor = texture2D(texture, vTextureCoord);
-				gl_FragColor  = vColor * smpColor;
-			}
-		`;
-		let gl = this.gl;
-		
-		// シェーダをコンパイルして生成
-		let createShader = function (src, type) {
-			let shader;
-			if (type === 'vertex') {
-				shader = gl.createShader(gl.VERTEX_SHADER);
-			} else if (type === 'fragment') {
-				shader = gl.createShader(gl.FRAGMENT_SHADER);
-			} else {
-				throw new Error(`createShader, シェーダのタイプが不正 (${type})`);
-			}
-			// 生成されたシェーダにソースを割り当てる
-			gl.shaderSource(shader, src);
-			// シェーダをコンパイルする
-			gl.compileShader(shader);
-			// シェーダが正しくコンパイルされたかチェック
-			if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-				// 成功していたらシェーダを返して終了
-				return shader;
-			} else {
-				// 失敗していたらエラーログをアラートする
-				let log = gl.getShaderInfoLog(shader);
-				console.log(type + ' : ' + log);
-				throw new Error(log);
-			}
-		}
-		let vShader = createShader(vSource, 'vertex');
-		let fShader = createShader(fSource, 'fragment');
-		this.vShader = vShader;
-		this.fShader = fShader;
-	}
-
-	/**
-	 * プログラムオブジェクトの初期化
-	 */
-	initProgram() {
-		let gl = this.gl;
-		// プログラムオブジェクトを生成
-		let program = gl.createProgram();
-	
-		// プログラムオブジェクトにシェーダ割り当て
-		gl.attachShader(program, this.vShader);
-		gl.attachShader(program, this.fShader);
-	
-		// シェーダをリンク
-		gl.linkProgram(program);
-	
-		// シェーダのリンクが正しくできたかチェック
-		if (gl.getProgramParameter(program, gl.LINK_STATUS)) {
-			// 成功
-			// プログラムオブジェクトを有効にする
-			gl.useProgram(program);
-			this.program = program;
-			return program;
-		} else {
-			let log = (gl.getProgramInfoLog(program));
-			console.log(log);
-			throw new Error(log);
-		}
-	}
-
-	/**
-	 * VBO（頂点バッファオブジェクト）を生成する
-	 * @param {Array} data 頂点バッファに保持させる情報
-	 */
-	createVbo(data) {
-		let gl = this.gl;
-		let vbo = gl.createBuffer();
-	
-		// バッファをバインド
-		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-		// バッファにデータを設定
-		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
-		// バッファのバインドを無効化
-		gl.bindBuffer(gl.ARRAY_BUFFER, null);
-	
-		return vbo;
-	}
-
-	/**
-	 * IBO（インデックスバッファオブジェクト）を生成する
-	 * @param {Array} data インデックスバッファの値
-	 */
-	createIbo(data) {
-		let gl = this.gl;
-		var ibo = gl.createBuffer();
-
-		// バッファをバインドする
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-		// バッファにデータをセット
-		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Int16Array(data), gl.STATIC_DRAW);
-		// バッファのバインドを無効化
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-
-		return ibo;
-	}
-
-	/**
-	 * GLオブジェクトにAttributeを設定する
-	 * @param {String} name Attribute名
-	 * @param {Number} stride 変数の要素数
-	 * @param {VBO} vbo 設定するVBO
-	 */
-	setAttribute(name, stride, vbo) {
-		let gl = this.gl;
-		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-	
-		// attributeLocationの取得
-		let location = gl.getAttribLocation(this.program, name);
-		// attributeを有効にする
-		gl.enableVertexAttribArray(location);
-		// VBOを登録
-		gl.vertexAttribPointer(location, stride, gl.FLOAT, false, 0, 0);
-	
-		gl.bindBuffer(gl.ARRAY_BUFFER, null);
-	}
-
-	/**
-	 * 描画をクリアする
-	 */
-	clear() {
-		let gl = this.gl;
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-	}
-
-	/**
-	 * コンテキストの再描画
-	 */
-	flush() {
-		this.gl.flush();
-	}
 }
 
 
@@ -415,10 +451,11 @@ let mygl = new MyGL(canvas, 600, 600);
 let img = new Image();
 img.onload = () => {
 	mygl.clear();
-	mygl.drawFillRect(10, 10, 300-10, 300-10, [1,1,0]);
-	mygl.drawFillRect(100, 100, 200, 200, [1,0,0]);
+	// mygl.drawFillRect(10, 10, 300-10, 300-10, [1,1,0]);
 	mygl.drawImage(0, 0, img);
 	mygl.drawImage(100, 100, img);
+	mygl.drawFillRect(600-1, 600-1, 600-100, 600-100, [1,0,0]);
+	mygl.drawFillTriangle(150, 150, 300, 150, 150, 300, [0,1,0]);
 	mygl.flush();
 };
 img.src = './image.jpg';
