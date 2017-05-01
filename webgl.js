@@ -34,6 +34,16 @@ class MyGL {
 
 		// コンテキストの再描画
 		this.flush();
+
+		let mativ = this.mativ;
+
+		this.triangleData = null;
+		this.rectData = null;
+		this.initTriangleData();
+		this.initRectData();
+		console.log(this.triangleData);
+		console.log(this.rectData);
+
 	}
 
 	/**
@@ -51,7 +61,6 @@ class MyGL {
 		mativ.translate(mMatrix, [0.0, 0.0, 0.0], mMatrix);
 		// ビュー座標変換行列（原点から上に1.0、後ろに3.0移動し、原点を注視点として見ている状態）
 		// mativ.lookAt([0.0, 1.0, 3.0], [0, 0, 0], [0, 1, 0], vMatrix);
-		// mativ.lookAt([0.0, 0.0, 1.0], [0, 0, 0], [0, 1, 0], vMatrix);
 		mativ.lookAt([1, -1, 1], [1, -1, 0], [0, 1, 0], vMatrix);
 		// プロジェクション座標変換行列
 		mativ.perspective(90, canvas.width / canvas.height, 0.1, 100, pMatrix);
@@ -71,6 +80,7 @@ class MyGL {
 		this.mvpMatrix = mvpMatrix;
 		this.uniLocation = uniLocation;
 	}
+
 	/**
 	 * WebGL関連の初期化
 	 * @param {Canvas} canvas キャンバス
@@ -227,6 +237,24 @@ class MyGL {
 	}
 
 	/**
+	 * VBO（頂点バッファオブジェクト）を生成する
+	 * @param {Float32Array} data 頂点バッファに保持させる情報
+	 */
+	createVbo2(data) {
+		let gl = this.gl;
+		let vbo = gl.createBuffer();
+	
+		// バッファをバインド
+		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+		// バッファにデータを設定
+		gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+		// バッファのバインドを無効化
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+	
+		return vbo;
+	}
+
+	/**
 	 * IBO（インデックスバッファオブジェクト）を生成する
 	 * @param {Array} data インデックスバッファの値
 	 */
@@ -237,6 +265,7 @@ class MyGL {
 		// バッファをバインドする
 		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
 		// バッファにデータをセット
+		// gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Int16Array(data), gl.STATIC_DRAW);
 		gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Int16Array(data), gl.STATIC_DRAW);
 		// バッファのバインドを無効化
 		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
@@ -280,23 +309,77 @@ class MyGL {
 		this.gl.flush();
 	}
 
-	drawFillTriangle(x1, y1, x2, y2, x3, y3, color) {
+	/**
+	 * 三角形描画の準備
+	 */
+	initTriangleData() {
 		let gl = this.gl;
 		let program = this.programList.polygon;
 
 		gl.useProgram(program);
 
 		let vertexPos = this.exchangePos([
-			x1, y1, 0,
-			x2, y2, 0,
-			x3, y3, 0
+			0, 0, 0,
+			32, 0, 0,
+			0, 32, 0
 		]);
-		let vertexPosVbo = this.createVbo(vertexPos);
+		let vertexPosArray = new Float32Array(vertexPos);
+		let vertexPosVbo = this.createVbo2(vertexPosArray);
 		this.setAttribute(program, 'position', 3, vertexPosVbo);
 		
-		let vertexColor = this.exchangeColor(color);
-		let vertexColorVbo = this.createVbo(vertexColor);
+		let vertexColor = this.exchangeColor([1,1,1]);
+		let vertexColorArray = new Float32Array(vertexColor);
+		let vertexColorVbo = this.createVbo2(vertexColorArray);
 		this.setAttribute(program, 'color', 4, vertexColorVbo);
+		
+		this.triangleData = {
+			vertexPos,
+			vertexPosArray,
+			vertexPosVbo,
+			vertexColor,
+			vertexColorArray,
+			vertexColorVbo
+		};
+	}
+
+	drawFillTriangle(x1, y1, x2, y2, x3, y3, color) {
+		let gl = this.gl;
+		let program = this.programList.polygon;
+		let d = this.triangleData;
+
+		gl.useProgram(program);
+
+		let pos = d.vertexPosArray;
+		x1 =   2 * x1 / this.canvas.width;
+		y1 = -(2 * y1 / this.canvas.height);
+		x2 =   2 * x2 / this.canvas.width;
+		y2 = -(2 * y2 / this.canvas.height);
+		x3 =   2 * x3 / this.canvas.width;
+		y3 = -(2 * y3 / this.canvas.height);
+		pos[0] = x1;
+		pos[1] = y1;
+		pos[2] = 0;
+		pos[3] = x2;
+		pos[4] = y2;
+		pos[5] = 0;
+		pos[6] = x3;
+		pos[7] = y3;
+		pos[8] = 0;
+		gl.bindBuffer(gl.ARRAY_BUFFER, d.vertexPosVbo);
+		gl.bufferSubData(gl.ARRAY_BUFFER, 0, d.vertexPosArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+		color = this.exchangeColor(color, 3);
+		let c = d.vertexColorArray;
+		for (let i = 0; i < color.length; i++) {
+			c[i] = color[i];
+		}
+		gl.bindBuffer(gl.ARRAY_BUFFER, d.vertexColorVbo);
+		gl.bufferSubData(gl.ARRAY_BUFFER, 0, d.vertexColorArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		
+		this.setAttribute(program, 'position', 3, d.vertexPosVbo);
+		this.setAttribute(program, 'color', 4, d.vertexColorVbo);
 		
 		// モデルの描画
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -305,39 +388,98 @@ class MyGL {
 		// console.log(vertexColor);
 	}
 
-	drawFillRect(x1, y1, x2, y2, color) {
+	/**
+	 * 四角形描画の初期化
+	 */
+	initRectData() {
 		let gl = this.gl;
 		let program = this.programList.polygon;
-
+	
 		gl.useProgram(program);
-
+	
 		let vertexPos = this.exchangePos([
-			x1, y1, 0,
-			x2, y1, 0,
-			x1, y2, 0,
-			x2, y2, 0
+			0, 0, 0,
+			32, 0, 0,
+			0, 32, 0,
+			32, 32, 0
 		], 4);
-		let vertexPosVbo = this.createVbo(vertexPos);
-		this.setAttribute(program, 'position', 3, vertexPosVbo);
+		let vertexPosArray = new Float32Array(vertexPos);
+		let vertexPosVbo = this.createVbo2(vertexPosArray);
 
-		let vertexColor = this.exchangeColor(color, 4);
-		let vertexColorVbo = this.createVbo(vertexColor);
-		this.setAttribute(program, 'color', 4, vertexColorVbo);
-
+		let vertexColor = this.exchangeColor([1,1,1], 4);
+		let vertexColorArray = new Float32Array(vertexColor);
+		let vertexColorVbo = this.createVbo2(vertexColorArray);
+	
 		let index = [
 			0, 1, 2,
 			1, 2, 3
 		];
 		let ibo = this.createIbo(index);
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-		gl.drawElements(gl.TRIANGLES, index.length, gl.UNSIGNED_SHORT, 0);
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 
+		this.rectData = {
+			vertexPos,
+			vertexPosArray,
+			vertexPosVbo,
+			vertexColor,
+			vertexColorArray,
+			vertexColorVbo,
+			index,
+			ibo,
+		}
+	}
+
+	/**
+	 * 四角形の描画
+	 */
+	drawFillRect(x1, y1, x2, y2, color) {
+		let gl = this.gl;
+		let program = this.programList.polygon;
+		let d = this.rectData;
+		
+		gl.useProgram(program);
+
+		x1 = 2 * x1 / this.canvas.width;
+		y1 = -(2 * y1 / this.canvas.height);
+		x2 = 2 * x2 / this.canvas.width;
+		y2 = -(2 * y2 / this.canvas.height);
+		let pos = d.vertexPosArray;
+		pos[0] = x1;
+		pos[1] = y1;
+		pos[2] = 0;
+		pos[3] = x2;
+		pos[4] = y1;
+		pos[5] = 0;
+		pos[6] = x1;
+		pos[7] = y2;
+		pos[8] = 0;
+		pos[9] = x2;
+		pos[10] = y2;
+		pos[11] = 0;
+		gl.bindBuffer(gl.ARRAY_BUFFER, d.vertexPosVbo);
+		gl.bufferSubData(gl.ARRAY_BUFFER, 0, d.vertexPosArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+		color = this.exchangeColor(color, 4);
+		let c = d.vertexColorArray;
+		for (let i = 0; i < color.length; i++) {
+			c[i] = color[i];
+		}
+		gl.bindBuffer(gl.ARRAY_BUFFER, d.vertexColorVbo);
+		gl.bufferSubData(gl.ARRAY_BUFFER, 0, d.vertexColorArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+		this.setAttribute(program, 'position', 3, d.vertexPosVbo);
+		this.setAttribute(program, 'color', 4, d.vertexColorVbo);
+		
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, d.ibo);
+		gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+	
 		// console.log(vertexPos);
 		// console.log(vertexColor);
 	}
 
-	drawImage(x, y, image) {
+	loadImage(image) {
 		let gl = this.gl;
 		let program = this.programList.texture;
 
@@ -345,7 +487,106 @@ class MyGL {
 
 		let tex = gl.createTexture();
 		gl.bindTexture(gl.TEXTURE_2D, tex);
-		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+		gl.generateMipmap(gl.TEXTURE_2D);
+
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+		gl.uniform1i(gl.getUniformLocation(program, 'texture'), 0);
+
+		let textureCoord = [
+			0, 0,
+			1, 0,
+			0, 1,
+			1, 1
+		];
+		let textureCoordVbo = this.createVbo(textureCoord);
+
+		let vertexPos = this.exchangePos([
+			0, 0, 0,
+			32, 0, 0,
+			0, 32, 0,
+			32, 32, 0
+		], 4);
+		let vertexPosArray = new Float32Array(vertexPos);
+		let vertexPosVbo = this.createVbo2(vertexPosArray);
+
+		let vertexColorVbo = this.createVbo([1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1]);
+
+		let index = [
+			0, 1, 2,
+			1, 2, 3
+		];
+		let ibo = this.createIbo(index);
+
+		return {
+			image,
+			width: image.width,
+			height: image.height,
+			tex,
+			textureCoord,
+			textureCoordVbo,
+			vertexPos,
+			vertexPosArray,
+			vertexPosVbo,
+			vertexColorVbo,
+			index,
+			ibo
+		};
+	}
+
+	drawImage(x, y, imageData) {
+		let gl = this.gl;
+		let program = this.programList.texture;
+		let d = imageData;
+
+		gl.useProgram(program);
+
+		// テクスチャ設定
+		gl.bindTexture(gl.TEXTURE_2D, d.tex);
+		gl.uniform1i(gl.getUniformLocation(program, 'texture'), 0);
+		this.setAttribute(program, 'textureCoord', 2, d.textureCoordVbo);
+
+		// 位置
+		let x1 = 2 * x / this.canvas.width;
+		let y1 = -(2 * y / this.canvas.height);
+		let x2 = 2 * (x + d.image.width) / this.canvas.width;
+		let y2 = -(2 * (y + d.image.height) / this.canvas.height);
+		let pos = d.vertexPosArray;
+		pos[0] = x1;
+		pos[1] = y1;
+		pos[2] = 0;
+		pos[3] = x2;
+		pos[4] = y1;
+		pos[5] = 0;
+		pos[6] = x1;
+		pos[7] = y2;
+		pos[8] = 0;
+		pos[9] = x2;
+		pos[10] = y2;
+		pos[11] = 0;
+		gl.bindBuffer(gl.ARRAY_BUFFER, d.vertexPosVbo);
+		gl.bufferSubData(gl.ARRAY_BUFFER, 0, d.vertexPosArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		this.setAttribute(program, 'position', 3, d.vertexPosVbo);
+
+		// 色
+		this.setAttribute(program, 'color', 4, d.vertexColorVbo);
+
+		// 描画
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, d.ibo);
+		gl.drawElements(gl.TRIANGLES, d.index.length, gl.UNSIGNED_SHORT, 0);
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+	}
+
+	drawImage2(x, y, image) {
+		let gl = this.gl;
+		let program = this.programList.texture;
+
+		gl.useProgram(program);
+
+		let tex = gl.createTexture();
+		gl.bindTexture(gl.TEXTURE_2D, tex);
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
 		gl.generateMipmap(gl.TEXTURE_2D); // ミップマップ生成
 
 		gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -448,18 +689,34 @@ let mygl = new MyGL(canvas, 600, 600);
 // mygl.drawFillRect(100, 100, 200, 200, [1,0,0]);
 // mygl.drawFillTriangle(150, 150, 300, 150, 150, 300, [1,0,0]);
 
+
 let img = new Image();
 img.onload = () => {
-	mygl.clear();
-	// mygl.drawFillRect(10, 10, 300-10, 300-10, [1,1,0]);
-	mygl.drawImage(0, 0, img);
-	mygl.drawImage(100, 100, img);
-	mygl.drawFillRect(600-1, 600-1, 600-100, 600-100, [1,0,0]);
-	mygl.drawFillTriangle(150, 150, 300, 150, 150, 300, [0,1,0]);
-	mygl.flush();
+	let imageData = mygl.loadImage(img);
+	setTimeout(() => {
+		mygl.clear();
+		let start = Date.now();
+		mygl.drawFillTriangle(0, 0, 300, 0, 0, 300, [1,0,0]);
+		mygl.drawFillRect(150, 150, 450, 450, [0,1,0]);
+		for (let i = 0; i < 10000; i++) {
+			mygl.drawImage((100+i) % 100, (100+i) % 100, imageData);
+		}
+		mygl.flush();
+		let time = Date.now() - start;
+		console.log('time=' + time);
+	}, 1);
 };
 img.src = './image.jpg';
 
-
+// let img = new Image();
+// img.onload = () => {
+// 	mygl.clear();
+// 	// mygl.drawFillRect(10, 10, 300-10, 300-10, [1,1,0]);
+// 	// mygl.drawImage(100, 100, img);
+// 	// mygl.drawFillTriangle(150, 150, 300, 150, 150, 300, [0,1,0]);
+// 	// mygl.flush();
+// };
+// img.src = './image.jpg';
+//
 
 
